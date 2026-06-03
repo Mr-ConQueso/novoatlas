@@ -1,6 +1,7 @@
 # NovoAtlas
 
 A data-driven image based world generator for Minecraft. Based on [Atlas](https://www.github.com/itsmiir/atlas/) by itsmiir.
+This fork backports the `Horizontal Scale` and `Water Maps` features.
 
 ## Installation 
 
