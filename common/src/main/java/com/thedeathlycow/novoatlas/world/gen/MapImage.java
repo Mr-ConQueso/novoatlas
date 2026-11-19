@@ -4,11 +4,13 @@ import net.minecraft.util.Mth;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
+import java.nio.MappedByteBuffer;
 
 public record MapImage(
         int width,
         int height,
         int[][] pixels,
+        MappedByteBuffer buffer,
         Type type
 ) {
     public enum Type {
@@ -22,7 +24,39 @@ public record MapImage(
 
         int[][] pixels = type == Type.BIOME_MAP ? getColorPixels(image, width, height) : getGrayScalePixels(image, width, height);
 
-        return new MapImage(width, height, pixels, type);
+        return new MapImage(width, height, pixels, null, type);
+    }
+
+    public static MapImage fromBinary(MappedByteBuffer buffer, Type type) {
+        // Read the 8-byte header written by the Python script
+        int width = buffer.getInt(0);
+        int height = buffer.getInt(4);
+
+        // Safety Net: If dimensions are wildly impossible, the header is missing or corrupted.
+        // This prevents the silent integer overflow and gives you a clear error in the console.
+        if (width <= 0 || height <= 0 || width > 100000 || height > 100000) {
+            throw new IllegalStateException("Corrupted MapImage header! Read Width: " + width +
+                    ", Height: " + height + ". Ensure you ran the latest Python script to add the 8-byte header.");
+        }
+
+        return new MapImage(width, height, null, buffer, type);
+    }
+
+    public int getPixel(int x, int z) {
+        if (this.buffer != null) {
+            // Cast to 'long' guarantees the multiplication never overflows Java's 32-bit limits
+            long index = ((long) z * this.width) + x;
+            int byteOffset = 8; // Skip the 8-byte header
+
+            if (this.type == Type.HEIGHTMAP) {
+                // Cast the final position back to int, as MappedByteBuffer requires an int index
+                return this.buffer.getShort((int) (byteOffset + index * 2)) & 0xFFFF;
+            } else {
+                return this.buffer.getInt((int) (byteOffset + index * 4)) >>> 8;
+            }
+        } else {
+            return this.pixels[x][z];
+        }
     }
 
     private static int[][] getGrayScalePixels(BufferedImage image, int width, int height) {
@@ -62,41 +96,26 @@ public record MapImage(
     }
 
     public int sample(int x, int z, MapInfo info, int fallback) {
-        double xR = (x / info.horizontalScale()) + this.width() / 2.0; // these will always be even numbers
+        double xR = (x / info.horizontalScale()) + this.width() / 2.0;
         double zR = (z / info.horizontalScale()) + this.height() / 2.0;
 
         if (xR < 0 || zR < 0 || xR >= this.width() || zR >= this.height()) {
             return fallback;
         }
 
-        int truncatedX = Mth.floor(xR);
-        int truncatedZ = Mth.floor(zR);
-
         if (this.type == Type.HEIGHTMAP) {
-            // xR - truncatedX gets the fractional part of the sampled point, to use for lerp deltas
-            double deltaX = xR - truncatedX;
-            double deltaZ = zR - truncatedZ;
-
-            double height = this.bilerp(truncatedX, deltaX, truncatedZ, deltaZ);
-
+            double height = info.interpolationStrategy().interpolate(xR, zR, this);
             return Mth.floor(info.verticalScale() * height + info.startingY());
         } else {
-            return this.pixels[truncatedX][truncatedZ];
+            int truncatedX = Mth.floor(xR);
+            int truncatedZ = Mth.floor(zR);
+            return this.getPixel(truncatedX, truncatedZ);
         }
     }
 
-    private double bilerp(int x, double deltaX, int z, double deltaZ) {
-        int u0 = Math.max(0, x);
-        int v0 = Math.max(0, z);
-
-        int u1 = Math.min(width - 1, u0 + 1);
-        int v1 = Math.min(v0 + 1, height - 1);
-
-        double i00 = pixels[u0][v0];
-        double i01 = pixels[u1][v0];
-        double i10 = pixels[u0][v1];
-        double i11 = pixels[u1][v1];
-
-        return Mth.lerp2(Math.abs(deltaX), Math.abs(deltaZ), i00, i10, i01, i11);
+    public int getTruncated(double x, double z) {
+        int truncatedX = Mth.floor(x);
+        int truncatedZ = Mth.floor(z);
+        return this.getPixel(truncatedX, truncatedZ);
     }
 }

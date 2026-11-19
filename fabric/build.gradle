@@ -46,10 +46,6 @@ processResources {
         include("novoatlas.accesswidener")
     }
 
-    from(rootProject.file("common/src/main/resources")) {
-        include("resourcepacks/**")
-    }
-
     filesMatching('fabric.mod.json') {
         expand version: project.version
     }

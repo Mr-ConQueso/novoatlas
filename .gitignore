@@ -36,3 +36,5 @@ src/main/generated/.cache/
 src/main/resources/pack.mcmeta
 .mixin.out/
 logs/
+/common/src/main/resources/resourcepacks/kingdoms-of-arda/
+/.run

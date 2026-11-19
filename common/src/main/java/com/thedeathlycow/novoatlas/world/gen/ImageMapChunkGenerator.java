@@ -1,8 +1,10 @@
 package com.thedeathlycow.novoatlas.world.gen;
 
+import com.google.common.base.Suppliers;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.thedeathlycow.novoatlas.mixin.accessor.NoiseBasedChunkGeneratorAccessor;
 import com.thedeathlycow.novoatlas.mixin.accessor.NoiseChunkAccessor;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -17,6 +19,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.*;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
@@ -62,6 +65,9 @@ public class ImageMapChunkGenerator extends NoiseBasedChunkGenerator {
         this.mapInfo = mapInfo;
         this.undergroundDensityFunction = undergroundDensityFunction;
         this.enableCarvers = enableCarvers;
+        ((NoiseBasedChunkGeneratorAccessor) this).novoatlas$setGlobalFluidPicker(
+                Suppliers.memoize(() -> this.pickFluid(this.generatorSettings().value()))
+        );
     }
 
     private static Holder<NoiseGeneratorSettings> applyHeightMapToDensityFunctions(
@@ -105,7 +111,7 @@ public class ImageMapChunkGenerator extends NoiseBasedChunkGenerator {
                 fixedNoiseRouter,
                 baseSettings.surfaceRule(),
                 baseSettings.spawnTarget(),
-                baseSettings.seaLevel(),
+                mapInfo.value().seaLevel().orElse(baseSettings.seaLevel()),
                 baseSettings.disableMobGeneration(),
                 baseSettings.aquifersEnabled(),
                 baseSettings.oreVeinsEnabled(),
@@ -119,6 +125,27 @@ public class ImageMapChunkGenerator extends NoiseBasedChunkGenerator {
     protected MapCodec<? extends ImageMapChunkGenerator> codec() {
         return CODEC;
     }
+
+    private Aquifer.FluidPicker pickFluid(NoiseGeneratorSettings settings) {
+        Aquifer.FluidStatus lava = new Aquifer.FluidStatus(-54, Blocks.LAVA.defaultBlockState());
+        int seaLevel = settings.seaLevel();
+        Aquifer.FluidStatus air = new Aquifer.FluidStatus(DimensionType.MIN_Y * 2, Blocks.AIR.defaultBlockState());
+
+        return (x, y, z) -> {
+            if (SharedConstants.DEBUG_DISABLE_FLUID_GENERATION) {
+                return air;
+            } else if (y < Math.min(-54, seaLevel)) {
+                return lava;
+            } else {
+                return new Aquifer.FluidStatus(this.sampleFluidElevation(x, z), settings.defaultFluid());
+            }
+        };
+    }
+
+    private int sampleFluidElevation(int x, int z) {
+        return this.mapInfo.value().getFluidHeightMapElevation(x, z, this.getSeaLevel());
+    }
+
 
     @Override
     public void applyCarvers(
